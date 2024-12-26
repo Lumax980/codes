@@ -1,0 +1,155 @@
+/* 
+   Project: LED Control and DHT11 Monitoring
+   Developed by: ALMA Creating
+   Description: This code sets up an ESP32 as an access point to control an LED and monitor temperature and humidity using a DHT11 sensor. 
+   It serves a web page that allows users to turn the LED on and off, as well as view real-time temperature and humidity data via gauges.
+*/
+
+
+#include <WiFi.h>
+#include <WebServer.h>
+#include "DHT.h"
+
+// Wi-Fi network settings
+const char* ssid = "ALMA Creating";
+const char* password = "password1234";
+
+// Pin definitions
+#define LED D3
+#define DHTPIN D2
+#define DHTTYPE DHT11 // DHT sensor type (DHT11)
+
+// Create an instance of the DHT sensor
+DHT dht(DHTPIN, DHTTYPE);
+
+// Create the web server instance
+WebServer server(80);
+
+// HTML page with controls
+const char* htmlPage = R"rawliteral(
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Control and Monitoring</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      text-align: center;
+      margin: 0;
+      padding: 0;
+      background-color: #f4f4f4;
+    }
+    h1 {
+      color: #2258E0;
+    }
+    .button {
+      display: inline-block;
+      padding: 15px 30px;
+      margin: 10px;
+      font-size: 18px;
+      color: #fff;
+      text-decoration: none;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+    }
+    .on {
+      background-color: #4CAF50;
+    }
+    .off {
+      background-color: #f44336;
+    }
+    .data {
+      margin: 20px;
+      font-size: 20px;
+    }
+  </style>
+</head>
+<body>
+  <h1>LED Control and DHT11 Monitoring</h1>
+  <button class="button on" onclick="fetch('/led/on')">Turn LED On</button>
+  <button class="button off" onclick="fetch('/led/off')">Turn LED Off</button>
+
+  <div class="data">
+    <h2>Temperature: <span id="temp-value">-- °C</span></h2>
+    <h2>Humidity: <span id="hum-value">-- %</span></h2>
+  </div>
+
+  <script>
+    function updateData() {
+      fetch('/dht')
+        .then(response => response.json())
+        .then(data => {
+          document.getElementById('temp-value').textContent = data.temperature + " °C";
+          document.getElementById('hum-value').textContent = data.humidity + " %";
+        })
+        .catch(err => console.log('Error fetching data from /dht:', err));
+    }
+
+    setInterval(updateData, 500); // Update every 2 seconds
+  </script>
+</body>
+</html>
+)rawliteral";
+
+void setup() {
+  // Initialize serial communication
+  Serial.begin(115200);
+
+  // Set up LED pin as output
+  pinMode(LED, OUTPUT);
+  digitalWrite(LED, LOW); // LED starts off
+
+  // Initialize the DHT sensor
+  dht.begin();
+
+  // Set up ESP32 as an access point
+  WiFi.softAP(ssid, password);
+  Serial.println("Access point created!");
+
+  // Display ESP32's IP address
+  Serial.print("ESP32 IP: ");
+  Serial.println(WiFi.softAPIP());
+
+  // Configure web server routes
+  server.on("/", []() {
+    server.send(200, "text/html", htmlPage); // Serve HTML page on root
+  });
+
+  server.on("/led/on", []() {
+    digitalWrite(LED, HIGH); // Turn LED on
+    server.send(200, "text/plain", "LED On");
+  });
+
+  server.on("/led/off", []() {
+    digitalWrite(LED, LOW); // Turn LED off
+    server.send(200, "text/plain", "LED Off");
+  });
+
+  server.on("/dht", []() {
+    // Read temperature and humidity from DHT11
+    float temperature = dht.readTemperature();
+    float humidity = dht.readHumidity();
+
+    // Check if the readings are valid
+    if (isnan(temperature) || isnan(humidity)) {
+      server.send(500, "application/json", "{\"error\":\"DHT11 read failure\"}");
+      Serial.println("Failed to read from DHT sensor!");
+    } else {
+      // Return the data as JSON
+      String json = "{\"temperature\":" + String(temperature) + ",\"humidity\":" + String(humidity) + "}";
+      server.send(200, "application/json", json);
+    }
+  });
+
+  // Start the server
+  server.begin();
+  Serial.println("Web server started.");
+}
+
+void loop() {
+  // Keep the server running
+  server.handleClient();
+}
